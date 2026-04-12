@@ -62,6 +62,29 @@ header p { opacity: 0.85; margin-top: 6px; font-size: 0.9rem; }
   white-space: nowrap;
 }
 .search-row button:hover { background: var(--dark-blue); }
+.filter-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-row select {
+  padding: 6px 12px;
+  border: 2px solid #dde8f0;
+  border-radius: 14px;
+  font-size: 0.88rem;
+  outline: none;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23666'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+.filter-row select:focus { border-color: var(--blue); }
 .exclude-area {
   margin-top: 14px;
   display: flex;
@@ -244,6 +267,8 @@ footer {
   .search-row button { width: 100%; }
   .detail-card .stats-row { gap: 12px; }
   .exclude-area { gap: 6px; }
+  .filter-row { flex-wrap: wrap; }
+  .filter-row select { width: 100%; }
 }
 </style>
 </head>
@@ -258,6 +283,18 @@ footer {
       <input type="search" id="searchInput" placeholder="输入材料名或菜谱名..." autocomplete="off" enterkeyhint="search">
       <button type="submit" id="searchBtn">搜索</button>
     </form>
+    <div class="filter-row">
+      <span class="exclude-label">厨具筛选：</span>
+      <select id="toolFilter">
+        <option value="">全部厨具</option>
+        <option value="平底锅">平底锅</option>
+        <option value="锅具组">锅具组</option>
+        <option value="打蛋器">打蛋器</option>
+        <option value="擀面杖">擀面杖</option>
+        <option value="烤箱">烤箱</option>
+        <option value="无">无厨具</option>
+      </select>
+    </div>
     <div class="exclude-area">
       <span class="exclude-label">排除材料：</span>
       <div class="exclude-tags" id="excludeTags"></div>
@@ -269,7 +306,7 @@ footer {
   </div>
   <div id="results"></div>
 </div>
-<footer>制作者：绫波大白丽_ &middot; 我的牧场：万物有滚牧场<br>菜谱数据来源：小红书ID: eternal（小红书号: 369356798）</footer>
+<footer>制作者：绫波大白丽_ &middot; 我的牧场：万物有滚牧场<br>菜谱数据来源：小红书ID: eternal（小红书号: 369356798）<br></footer>
 
 <script>
 const RAW = `巧克力,可可,杏仁,平底锅,,5,100,7,200
@@ -497,9 +534,32 @@ function getCatNotes(list) {
   return notes;
 }
 
+function filterByTool(list) {
+  const tool = document.getElementById('toolFilter').value;
+  if (!tool) return list;
+  if (tool === '无') return list.filter(r => r.tool === '无' || r.tool === '-' || r.tool === '');
+  return list.filter(r => r.tool === tool);
+}
+
 function doSearch() {
   const query = document.getElementById('searchInput').value.trim();
-  if (!query) { document.getElementById('results').innerHTML = ''; return; }
+  const toolVal = document.getElementById('toolFilter').value;
+
+  if (!query && !toolVal) { document.getElementById('results').innerHTML = ''; return; }
+
+  if (!query && toolVal) {
+    let all = filterByTool(applyExclusions([...recipes]));
+    all = sortRecipes(all, sortState.col, sortState.dir);
+    const toolLabel = toolVal === '无' ? '无厨具' : toolVal;
+    let html = `<div class="section-title">「${toolLabel}」全部菜谱 <span class="count">${all.length}道</span></div>`;
+    html += renderTable(all, '', 'tool');
+    const notes = getCatNotes(all);
+    if (notes.size > 0) html += renderCatNotes(notes);
+    if (all.length === 0) html = `<div class="no-result">未找到「${toolLabel}」的菜谱</div>`;
+    document.getElementById('results').innerHTML = html;
+    bindTableSort();
+    return;
+  }
 
   const parentCat = itemToCategory[query];
 
@@ -521,9 +581,9 @@ function doSearch() {
   });
   let nameResults = recipes.filter(r => r.name.includes(query));
 
-  matResults = applyExclusions(matResults);
-  bonResults = applyExclusions(bonResults);
-  nameResults = applyExclusions(nameResults);
+  matResults = filterByTool(applyExclusions(matResults));
+  bonResults = filterByTool(applyExclusions(bonResults));
+  nameResults = filterByTool(applyExclusions(nameResults));
 
   const matNames = new Set(matResults.map(r => r.name));
   bonResults = bonResults.filter(r => !matNames.has(r.name));
@@ -555,7 +615,7 @@ function doSearch() {
     html += renderTable(nameResults, query, 'name');
   } else if (matResults.length === 0 && bonResults.length === 0) {
     const exactMatch = recipes.find(r => r.name === query);
-    if (exactMatch) {
+    if (exactMatch && (!toolVal || exactMatch.tool === toolVal || (toolVal === '无' && !exactMatch.tool))) {
       html += renderCard(exactMatch);
     }
   }
@@ -567,7 +627,8 @@ function doSearch() {
   }
 
   if (!html) {
-    html = '<div class="no-result">未找到与「' + query + '」相关的菜谱</div>';
+    const extra = toolVal ? `（厨具：${toolVal === '无' ? '无厨具' : toolVal}）` : '';
+    html = '<div class="no-result">未找到与「' + query + '」相关的菜谱' + extra + '</div>';
   }
 
   document.getElementById('results').innerHTML = html;
@@ -703,12 +764,14 @@ document.getElementById('searchBtn').addEventListener('click', doSearch);
 document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
 });
+document.getElementById('toolFilter').addEventListener('change', doSearch);
 document.getElementById('addExcludeBtn').addEventListener('click', addExclude);
 document.getElementById('excludeInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') addExclude();
 });
 
 document.getElementById('searchInput').focus();
+
 </script>
 </body>
 </html>
