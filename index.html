@@ -466,7 +466,7 @@ const CATEGORIES = {
   "河豚类":"河豚、箱河豚",
   "肉食类":"花鲶、鳢鱼、食人鱼、土鲋、星鳗、黑鲈、黄金花鲶",
   "大型鱼":"鲨鱼、旗鱼、鲔鱼、豆腐鲨、锯鲨、黄金旗鱼、黄金鲔鱼",
-  "软体类":"鱿鱼、章鱼、黄金鱿鱼、黄金章鱼",
+  "软体类":"鱿鱼(乌贼)、章鱼、黄金鱿鱼、黄金章鱼",
   "甲壳类":"虾、小龙虾、龙虾、黄金小龙虾",
   "贝类":"花蛤、蝾螺、蛤蜊、帆立贝、淡菜",
   "未分类鱼类":"泥鳅、鳖、鲣鱼、螃蟹、灯笼鱼、海天使、油甘、鲤鱼、皇带鱼、皱鳃鲨、巨狗脂鲤、巨骨舌鱼、海带、红龙虾、帝王蟹、黄金灯笼鱼、黄金鲤鱼",
@@ -492,6 +492,16 @@ const itemToCategory = {};
 for (const [cat, items] of Object.entries(CATEGORIES)) {
   items.split('、').forEach(it => { itemToCategory[it.trim()] = cat; });
 }
+// 鱿鱼(乌贼) 拆成单独词条，便于按「鱿鱼」「乌贼」查分类
+itemToCategory['鱿鱼'] = itemToCategory['鱿鱼(乌贼)'] || '软体类';
+itemToCategory['乌贼'] = itemToCategory['鱿鱼(乌贼)'] || '软体类';
+// 同一食材不同叫法：搜索任一名称都等价
+const INGREDIENT_SYNONYMS = { 乌贼: ['鱿鱼'], 鱿鱼: ['乌贼'] };
+for (const [a, list] of Object.entries(INGREDIENT_SYNONYMS)) {
+  for (const b of list) {
+    if (itemToCategory[b] && !itemToCategory[a]) itemToCategory[a] = itemToCategory[b];
+  }
+}
 
 // ========== STATE ==========
 let excludeList = [];
@@ -500,6 +510,12 @@ let sortState = { col: 'price', dir: 'asc' };
 // ========== SEARCH ==========
 function matchText(haystack, needle) {
   return haystack && haystack.includes(needle);
+}
+
+function matchIngredient(haystack, userQuery) {
+  if (!haystack || !userQuery) return false;
+  const variants = [userQuery, ...(INGREDIENT_SYNONYMS[userQuery] || [])];
+  return variants.some(v => haystack.includes(v));
 }
 
 function applyExclusions(list) {
@@ -570,12 +586,12 @@ function doSearch() {
   }
 
   let matResults = recipes.filter(r => {
-    if (matchText(r.materials, query)) return true;
+    if (matchIngredient(r.materials, query)) return true;
     if (parentCat && matchText(r.materials, parentCat)) return true;
     return false;
   });
   let bonResults = recipes.filter(r => {
-    if (matchText(r.bonus, query)) return true;
+    if (matchIngredient(r.bonus, query)) return true;
     if (parentCat && matchText(r.bonus, parentCat)) return true;
     return false;
   });
@@ -641,9 +657,14 @@ function fmtNum(n) { return n ? n.toLocaleString() : '-'; }
 
 function hl(text, query) {
   if (!text || !query) return text || '-';
-  const idx = text.indexOf(query);
-  if (idx === -1) return text;
-  return text.substring(0, idx) + '<span class="hl">' + query + '</span>' + text.substring(idx + query.length);
+  const variants = [query, ...(INGREDIENT_SYNONYMS[query] || [])];
+  for (const q of variants) {
+    const idx = text.indexOf(q);
+    if (idx !== -1) {
+      return text.substring(0, idx) + '<span class="hl">' + q + '</span>' + text.substring(idx + q.length);
+    }
+  }
+  return text;
 }
 
 function renderCard(r) {
